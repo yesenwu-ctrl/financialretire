@@ -124,8 +124,10 @@ def ask_ai_with_gemini(question, portfolio_context, api_key, model="gemini-3.5-f
             contents=f"{AI_SYSTEM_PROMPT}\n\n{user_prompt}"
         )
         return response.text
+    except ImportError:
+        return "⚠️ 需要安裝 google-genai 套件"
     except Exception as e:
-        return None
+        return f"⚠️ Gemini 錯誤：{str(e)}"
 
 def ask_ai_with_groq(question, portfolio_context, api_key, model="llama-3.3-70b-versatile", news_context=""):
     """使用 Groq 回答"""
