@@ -19,6 +19,11 @@ st.set_page_config(
     layout="wide"
 )
 
+# ==================== 密碼保護設定 ====================
+# 請修改為您想要的密碼
+APP_PASSWORD = "family2024"
+# =====================================================
+
 # 持股資料
 PORTFOLIO = [
     {'code': '2801', 'name': '彰銀', 'shares': 2000, 'cost': 41950, 'prevClose': 23.20},
@@ -28,6 +33,42 @@ PORTFOLIO = [
 ]
 
 REALIZED_PNL = 1698
+
+def check_password():
+    """密碼驗證函數"""
+    # 初始化 session state
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
+    
+    # 如果已驗證，直接返回
+    if st.session_state.authenticated:
+        return True
+    
+    # 顯示登入頁面
+    st.markdown("""
+    <style>
+    .main {display: flex; justify-content: center; align-items: center; min-height: 60vh;}
+    .stLogin {text-align: center;}
+    </style>
+    """, unsafe_allow_html=True)
+    
+    st.title("🔒 持股追蹤資訊")
+    st.markdown("---")
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown("### 請輸入密碼")
+        password = st.text_input("密碼", type="password", placeholder="請輸入密碼", label_visibility="collapsed")
+        
+        if st.button("登入", use_container_width=True, type="primary"):
+            if password == APP_PASSWORD:
+                st.session_state.authenticated = True
+                st.rerun()
+            else:
+                st.error("密碼錯誤，請重新輸入")
+                return False
+    
+    return False
 
 @st.cache_data(ttl=300)  # 快取5分鐘
 def fetch_twse_data(stock_code):
@@ -74,6 +115,19 @@ def get_stock_info(stock_code):
     return None
 
 def main():
+    # 密碼驗證
+    if not check_password():
+        return
+    
+    # 側邊欄 - 登出按鈕
+    with st.sidebar:
+        st.markdown("### ⚙️ 設定")
+        if st.button("🚪 登出", use_container_width=True):
+            st.session_state.authenticated = False
+            st.rerun()
+        st.markdown("---")
+        st.caption("資料來源：TWSE")
+    
     # 標題
     st.title("📊 持股追蹤資訊")
     
