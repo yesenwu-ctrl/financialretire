@@ -11,6 +11,7 @@ import urllib.request
 import urllib.error
 from datetime import datetime
 import pandas as pd
+from duckduckgo_search import DDGS
 
 # 頁面設定
 st.set_page_config(
@@ -136,6 +137,109 @@ def ask_ai(question, portfolio_context):
 **2. Groq (備援，速度快)**
 - 取得：https://console.groq.com/keys
 - 加入：`GROQ_API_KEY = "您的Key"`"""
+
+# ==================== 網路搜尋功能 ====================
+def search_stock_news(query, max_results=5):
+    """搜尋股票相關新聞"""
+    try:
+        with DDGS() as ddgs:
+            results = list(ddgs.news(query, region="tw-tw", max_results=max_results))
+            return results
+    except Exception as e:
+        return []
+
+def search_web(query, max_results=5):
+    """搜尋網路資訊"""
+    try:
+        with DDGS() as ddgs:
+            results = list(ddgs.text(query, region="tw-tw", max_results=max_results))
+            return results
+    except Exception as e:
+        return []
+
+def format_news_for_ai(news_list):
+    """將新聞格式化為 AI 可讀的格式"""
+    if not news_list:
+        return "無法取得最新新聞。"
+    
+    lines = ["以下是搜尋到的相關新聞：\n"]
+    for i, news in enumerate(news_list, 1):
+        title = news.get('title', '無標題')
+        body = news.get('body', '無摘要')
+        url = news.get('url', '')
+        source = news.get('source', '')
+        date = news.get('date', '')
+        lines.append(f"{i}. **{title}**")
+        lines.append(f"   來源：{source} | 時間：{date}")
+        lines.append(f"   摘要：{body}")
+        lines.append(f"   連結：{url}\n")
+    
+    return "\n".join(lines)
+
+def ask_ai_with_news(question, portfolio_context, api_key, news_context=""):
+    """使用 AI 回答投資問題（包含最新新聞）"""
+    system_prompt = """你是一位專業的投資理財顧問，專精台灣股市分析。
+請根據用戶的持股資料和最新新聞，提供專業的投資建議和分析。
+回答時請使用繁體中文，並保持客觀、專業的態度。
+請注意：你的回答僅供參考，不構成投資建議。"""
+    
+    user_prompt = f"""以下是用戶目前的持股資料：
+
+{portfolio_context}
+
+{news_context}
+
+用戶的問題：{question}
+
+請根據以上資料（包含最新新聞）回答用戶的問題。"""
+    
+    try:
+        from google import genai
+        
+        client = genai.Client(api_key=api_key)
+        
+        response = client.models.generate_content(
+            model="gemini-3.5-flash",
+            contents=f"{system_prompt}\n\n{user_prompt}"
+        )
+        return response.text
+    except Exception as e:
+        return None
+
+def ask_ai_with_groq_news(question, portfolio_context, api_key, news_context=""):
+    """使用 Groq 回答投資問題（包含最新新聞）"""
+    system_prompt = """你是一位專業的投資理財顧問，專精台灣股市分析。
+請根據用戶的持股資料和最新新聞，提供專業的投資建議和分析。
+回答時請使用繁體中文，並保持客觀、專業的態度。
+請注意：你的回答僅供參考，不構成投資建議。"""
+    
+    user_prompt = f"""以下是用戶目前的持股資料：
+
+{portfolio_context}
+
+{news_context}
+
+用戶的問題：{question}
+
+請根據以上資料（包含最新新聞）回答用戶的問題。"""
+    
+    try:
+        from groq import Groq
+        
+        client = Groq(api_key=api_key)
+        
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.7,
+            max_tokens=1000
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return None
 
 def format_portfolio_for_ai(portfolio_data):
     """將持股資料格式化為 AI 可讀的格式"""
@@ -378,6 +482,10 @@ def main():
     st.subheader("🤖 AI 投資助手")
     st.caption("有任何投資問題，可以直接在下方提問，AI 會根據您的持股資料進行分析")
     
+    # 新聞搜尋選項
+    use_news_search = st.checkbox("📰 搜尋最新新聞輔助分析", value=True, 
+                                  help="開啟後 AI 會自動搜尋相關新聞來提供更即時的分析")
+    
     # 初始化聊天記錄
     if "messages" not in st.session_state:
         st.session_state.messages = []
@@ -398,7 +506,48 @@ def main():
         with st.chat_message("assistant"):
             with st.spinner("AI 正在分析中..."):
                 portfolio_context = format_portfolio_for_ai(portfolio_data)
-                response = ask_ai(prompt, portfolio_context)
+                
+                # 根據用戶問題搜尋相關新聞
+                news_context = ""
+                if use_news_search:
+                    # 根據問題和持股建立搜尋關鍵字
+                    search_keywords = prompt
+                    # 如果問題中提到特定股票，加入該股票名稱
+                    for stock in portfolio_data:
+                        if stock["code"] in prompt or stock["name"] in prompt:
+                            search_keywords = f"{stock['code']} {stock['name']} {prompt}"
+                            break
+                    
+                    with st.spinner("🔍 搜尋最新新聞..."):
+                        news_results = search_stock_news(search_keywords, max_results=3)
+                        news_context = format_news_for_ai(news_results)
+                
+                # 嘗試使用 AI 回答（包含新聞）
+                gemini_key, groq_key = get_ai_config()
+                
+                response = None
+                # 1. 嘗試 Gemini (首要)
+                if gemini_key:
+                    response = ask_ai_with_news(prompt, portfolio_context, gemini_key, news_context)
+                
+                # 2. 嘗試 Groq (備援)
+                if not response and groq_key:
+                    response = ask_ai_with_groq_news(prompt, portfolio_context, groq_key, news_context)
+                
+                # 3. 都失敗則顯示設定說明
+                if not response:
+                    response = """⚠️ AI 功能尚未設定或已达使用上限。
+
+請在 Streamlit Cloud 的 Secrets 中設定以下任一 API Key：
+
+**1. Google Gemini 3.5 Flash (推薦)**
+- 取得：https://aistudio.google.com/apikey
+- 加入：`GEMINI_API_KEY = "您的Key"`
+
+**2. Groq (備援)**
+- 取得：https://console.groq.com/keys
+- 加入：`GROQ_API_KEY = "您的Key"`"""
+                
                 st.markdown(response)
         st.session_state.messages.append({"role": "assistant", "content": response})
 
