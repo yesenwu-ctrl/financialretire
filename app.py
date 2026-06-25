@@ -143,18 +143,18 @@ def search_stock_news(query, max_results=5):
     """搜尋股票相關新聞"""
     try:
         with DDGS() as ddgs:
-            # 嘗試新聞搜尋
-            results = list(ddgs.news(query, region="tw-tw", max_results=max_results))
+            # 嘗試新聞搜尋 (不指定區域，增加成功率)
+            results = list(ddgs.news(query, max_results=max_results))
             if results:
                 return results
             # 如果沒有新聞結果，改用一般搜尋
-            results = list(ddgs.text(query + " 最新消息", region="tw-tw", max_results=max_results))
+            results = list(ddgs.text(query + " 最新消息", max_results=max_results))
             return results
     except Exception as e:
         # 嘗試一般搜尋作為備援
         try:
             with DDGS() as ddgs:
-                results = list(ddgs.text(query + " 股票 新聞", region="tw-tw", max_results=max_results))
+                results = list(ddgs.text(query + " 股票 新聞", max_results=max_results))
                 return results
         except:
             return []
@@ -163,7 +163,7 @@ def search_web(query, max_results=5):
     """搜尋網路資訊"""
     try:
         with DDGS() as ddgs:
-            results = list(ddgs.text(query, region="tw-tw", max_results=max_results))
+            results = list(ddgs.text(query, max_results=max_results))
             return results
     except Exception as e:
         return []
@@ -539,6 +539,8 @@ def main():
                         # 顯示搜尋到的新聞來源
                         if news_results:
                             st.info(f"📰 找到 {len(news_results)} 則相關資訊")
+                        else:
+                            st.warning("⚠️ 無法取得最新新聞，將使用歷史資料分析")
                 
                 # 嘗試使用 AI 回答（包含新聞）
                 gemini_key, groq_key = get_ai_config()
