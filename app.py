@@ -25,19 +25,28 @@ APP_PASSWORD = "740704"
 # =====================================================
 
 # ==================== AI 功能設定 ====================
-# OpenAI API 設定 (需在 Streamlit Cloud 設定 secrets)
-def get_openai_api_key():
-    """取得 OpenAI API Key"""
+# AI API 設定 (需在 Streamlit Cloud 設定 secrets)
+def get_ai_config():
+    """取得 AI API 設定"""
+    # 優先使用 Google Gemini (免費)
+    gemini_key = None
+    openai_key = None
+    
     try:
-        return st.secrets["OPENAI_API_KEY"]
+        gemini_key = st.secrets["GEMINI_API_KEY"]
     except:
-        return None
+        pass
+    
+    try:
+        openai_key = st.secrets["OPENAI_API_KEY"]
+    except:
+        pass
+    
+    return gemini_key, openai_key
 
 def ask_ai(question, portfolio_context):
     """使用 AI 回答投資相關問題"""
-    api_key = get_openai_api_key()
-    if not api_key:
-        return "⚠️ AI 功能尚未設定。請在 Streamlit Cloud 的 Secrets 中設定 OPENAI_API_KEY。"
+    gemini_key, openai_key = get_ai_config()
     
     system_prompt = """你是一位專業的投資理財顧問，專精台灣股市分析。
 請根據用戶的持股資料，提供專業的投資建議和分析。
@@ -52,25 +61,52 @@ def ask_ai(question, portfolio_context):
 
 請根據以上資料回答用戶的問題。"""
     
-    try:
-        import openai
-        client = openai.OpenAI(api_key=api_key)
-        
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.7,
-            max_tokens=1000
-        )
-        
-        return response.choices[0].message.content
-    except ImportError:
-        return "⚠️ 需要安裝 openai 套件。請在 requirements.txt 加入 openai。"
-    except Exception as e:
-        return f"⚠️ AI 請求失敗：{str(e)}"
+    # 嘗試使用 Google Gemini (免費)
+    if gemini_key:
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=gemini_key)
+            
+            model = genai.GenerativeModel('gemini-2.0-flash')
+            response = model.generate_content(
+                f"{system_prompt}\n\n{user_prompt}"
+            )
+            return response.text
+        except ImportError:
+            return "⚠️ 需要安裝 google-generativeai 套件。"
+        except Exception as e:
+            pass  # 嘗試下一個 API
+    
+    # 嘗試使用 OpenAI
+    if openai_key:
+        try:
+            import openai
+            client = openai.OpenAI(api_key=openai_key)
+            
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.7,
+                max_tokens=1000
+            )
+            return response.choices[0].message.content
+        except ImportError:
+            return "⚠️ 需要安裝 openai 套件。"
+        except Exception as e:
+            return f"⚠️ AI 請求失敗：{str(e)}"
+    
+    return """⚠️ AI 功能尚未設定。
+
+請擇一設定：
+1. **Google Gemini (推薦，免費)**：在 Secrets 加入 `GEMINI_API_KEY`
+2. **OpenAI**：在 Secrets 加入 `OPENAI_API_KEY`
+
+取得方式：
+- Gemini：https://aistudio.google.com/apikey
+- OpenAI：https://platform.openai.com/api-keys"""
 
 def format_portfolio_for_ai(portfolio_data):
     """將持股資料格式化為 AI 可讀的格式"""
