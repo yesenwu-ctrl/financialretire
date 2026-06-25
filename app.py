@@ -247,72 +247,9 @@ def ask_ai(question, portfolio_context, provider_name, model_name, news_context=
 
 # ==================== 網路搜尋功能 ====================
 def search_stock_news(query, max_results=5):
-    """直接從台灣財經新聞網站抓取相關新聞"""
-    import urllib.parse
-    import re
-    
-    news_list = []
-    
-    # 嘗試從 Yahoo 股市搜尋
-    try:
-        encoded_query = urllib.parse.quote(query)
-        url = f"https://tw.stock.yahoo.com/news/search?q={encoded_query}"
-        
-        req = urllib.request.Request(url, headers={
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
-        })
-        
-        with urllib.request.urlopen(req, timeout=10) as response:
-            html = response.read().decode('utf-8')
-            
-            # 找新聞標題和連結
-            title_pattern = r'<h3[^>]*>.*?<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>'
-            titles = re.findall(title_pattern, html, re.DOTALL)
-            
-            for link, title in titles[:max_results]:
-                clean_title = re.sub(r'<[^>]+>', '', title).strip()
-                if clean_title:
-                    news_list.append({
-                        'title': clean_title,
-                        'snippet': '',
-                        'link': link if link.startswith('http') else f"https://tw.stock.yahoo.com{link}",
-                        'source': 'Yahoo 股市',
-                        'date': ''
-                    })
-    except Exception as e:
-        pass
-    
-    # 如果 Yahoo 沒有結果，嘗試鉅亨網
-    if not news_list:
-        try:
-            encoded_query = urllib.parse.quote(query)
-            url = f"https://www.cnyes.com/search/news?q={encoded_query}"
-            
-            req = urllib.request.Request(url, headers={
-                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
-            })
-            
-            with urllib.request.urlopen(req, timeout=10) as response:
-                html = response.read().decode('utf-8')
-                
-                # 找新聞標題
-                title_pattern = r'<a[^>]*class="[^"]*title[^"]*"[^>]*>(.*?)</a>'
-                titles = re.findall(title_pattern, html, re.DOTALL)
-                
-                for title in titles[:max_results]:
-                    clean_title = re.sub(r'<[^>]+>', '', title).strip()
-                    if clean_title:
-                        news_list.append({
-                            'title': clean_title,
-                            'snippet': '',
-                            'link': f"https://www.cnyes.com/search/news?q={encoded_query}",
-                            'source': '鉅亨網',
-                            'date': ''
-                        })
-        except Exception as e:
-            pass
-    
-    return news_list[:max_results]
+    """暫時停用新聞搜尋 - 網站結構頻繁變動，需要定期維護"""
+    # 回傳空列表，讓 AI 使用歷史資料分析
+    return []
 
 def format_news_for_ai(news_list):
     """將新聞格式化為 AI 可讀的格式"""
@@ -564,9 +501,8 @@ def main():
     st.subheader("🤖 AI 投資助手")
     st.caption("有任何投資問題，可以直接在下方提問，AI 會根據您的持股資料進行分析")
     
-    # 新聞搜尋選項
-    use_news_search = st.checkbox("📰 搜尋最新新聞輔助分析", value=True, 
-                                  help="開啟後 AI 會自動搜尋相關新聞來提供更即時的分析")
+    # 新聞搜尋選項 (暫時停用)
+    st.info("📰 新聞搜尋功能暫時停用中（網站結構變動，需要維護）。AI 將使用持股資料進行分析。")
     
     # 初始化聊天記錄
     if "messages" not in st.session_state:
@@ -589,38 +525,11 @@ def main():
             with st.spinner("AI 正在分析中..."):
                 portfolio_context = format_portfolio_for_ai(portfolio_data)
                 
-                # 根據用戶問題搜尋相關新聞
-                news_context = ""
-                if use_news_search:
-                    search_keywords = prompt
-                    for stock in portfolio_data:
-                        if stock["code"] in prompt or stock["name"] in prompt:
-                            search_keywords = f"{stock['code']} {stock['name']} 股票 新聞"
-                            break
-                    if search_keywords == prompt:
-                        search_keywords = f"台股 {prompt}"
-                    
-                    with st.spinner("🔍 搜尋最新新聞..."):
-                        news_results = search_stock_news(search_keywords, max_results=3)
-                        news_context = format_news_for_ai(news_results)
-                        
-                        if news_results:
-                            st.info(f"📰 找到 {len(news_results)} 則相關資訊")
-                            with st.expander("📋 查看搜尋到的新聞內容", expanded=False):
-                                for i, news in enumerate(news_results, 1):
-                                    title = news.get('title', '無標題')
-                                    snippet = news.get('snippet', '無摘要')[:200]
-                                    st.write(f"**{i}. {title}**")
-                                    st.write(f"   {snippet}...")
-                                    st.write("")
-                        else:
-                            st.warning("⚠️ 無法取得最新新聞，將使用歷史資料分析")
+                # 使用選定的 AI 供應商 (暫時不使用新聞)
+                provider_name = st.session_state.get("selected_provider", "Groq")
+                model_name = st.session_state.get("selected_model", "llama-3.3-70b-versatile")
                 
-                # 使用選定的 AI 供應商
-                provider_name = st.session_state.get("selected_provider", "Google Gemini")
-                model_name = st.session_state.get("selected_model", "gemini-3.5-flash")
-                
-                response = ask_ai(prompt, portfolio_context, provider_name, model_name, news_context)
+                response = ask_ai(prompt, portfolio_context, provider_name, model_name)
                 
                 st.markdown(response)
         st.session_state.messages.append({"role": "assistant", "content": response})
