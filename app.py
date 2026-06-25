@@ -28,9 +28,8 @@ APP_PASSWORD = "740704"
 # AI API 設定 (需在 Streamlit Cloud 設定 secrets)
 def get_ai_config():
     """取得 AI API 設定"""
-    # 優先使用 Google Gemini (免費)
     gemini_key = None
-    openai_key = None
+    groq_key = None
     
     try:
         gemini_key = st.secrets["GEMINI_API_KEY"]
@@ -38,16 +37,14 @@ def get_ai_config():
         pass
     
     try:
-        openai_key = st.secrets["OPENAI_API_KEY"]
+        groq_key = st.secrets["GROQ_API_KEY"]
     except:
         pass
     
-    return gemini_key, openai_key
+    return gemini_key, groq_key
 
-def ask_ai(question, portfolio_context):
-    """使用 AI 回答投資相關問題"""
-    gemini_key, openai_key = get_ai_config()
-    
+def ask_ai_with_gemini(question, portfolio_context, api_key):
+    """使用 Google Gemini 3.5 Flash 回答"""
     system_prompt = """你是一位專業的投資理財顧問，專精台灣股市分析。
 請根據用戶的持股資料，提供專業的投資建議和分析。
 回答時請使用繁體中文，並保持客觀、專業的態度。
@@ -61,52 +58,84 @@ def ask_ai(question, portfolio_context):
 
 請根據以上資料回答用戶的問題。"""
     
-    # 嘗試使用 Google Gemini (免費)
+    try:
+        from google import genai
+        
+        client = genai.Client(api_key=api_key)
+        
+        response = client.models.generate_content(
+            model="gemini-3.5-flash",
+            contents=f"{system_prompt}\n\n{user_prompt}"
+        )
+        return response.text
+    except ImportError:
+        return "⚠️ 需要安裝 google-genai 套件。"
+    except Exception as e:
+        return None  # 回傳 None 讓呼叫端嘗試下一個 API
+
+def ask_ai_with_groq(question, portfolio_context, api_key):
+    """使用 Groq (Llama 3) 回答"""
+    system_prompt = """你是一位專業的投資理財顧問，專精台灣股市分析。
+請根據用戶的持股資料，提供專業的投資建議和分析。
+回答時請使用繁體中文，並保持客觀、專業的態度。
+請注意：你的回答僅供參考，不構成投資建議。"""
+    
+    user_prompt = f"""以下是用戶目前的持股資料：
+
+{portfolio_context}
+
+用戶的問題：{question}
+
+請根據以上資料回答用戶的問題。"""
+    
+    try:
+        from groq import Groq
+        
+        client = Groq(api_key=api_key)
+        
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.7,
+            max_tokens=1000
+        )
+        return response.choices[0].message.content
+    except ImportError:
+        return "⚠️ 需要安裝 groq 套件。"
+    except Exception as e:
+        return None  # 回傳 None 讓呼叫端嘗試下一個 API
+
+def ask_ai(question, portfolio_context):
+    """使用 AI 回答投資相關問題 (支援多個 API 嘗試)"""
+    gemini_key, groq_key = get_ai_config()
+    
+    # 1. 嘗試使用 Gemini 3.5 Flash (首要)
     if gemini_key:
-        try:
-            import google.generativeai as genai
-            genai.configure(api_key=gemini_key)
-            
-            model = genai.GenerativeModel('gemini-2.5-flash')
-            response = model.generate_content(
-                f"{system_prompt}\n\n{user_prompt}"
-            )
-            return response.text
-        except ImportError:
-            return "⚠️ 需要安裝 google-generativeai 套件。"
-        except Exception as e:
-            pass  # 嘗試下一個 API
+        result = ask_ai_with_gemini(question, portfolio_context, gemini_key)
+        if result and not result.startswith("⚠️"):
+            return result
     
-    # 嘗試使用 OpenAI
-    if openai_key:
-        try:
-            import openai
-            client = openai.OpenAI(api_key=openai_key)
-            
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.7,
-                max_tokens=1000
-            )
-            return response.choices[0].message.content
-        except ImportError:
-            return "⚠️ 需要安裝 openai 套件。"
-        except Exception as e:
-            return f"⚠️ AI 請求失敗：{str(e)}"
+    # 2. 嘗試使用 Groq (備援)
+    if groq_key:
+        result = ask_ai_with_groq(question, portfolio_context, groq_key)
+        if result and not result.startswith("⚠️"):
+            return result
     
-    return """⚠️ AI 功能尚未設定。
+    # 3. 都無法使用時，顯示設定說明
+    return """⚠️ AI 功能尚未設定或已达使用上限。
 
-請擇一設定：
-1. **Google Gemini (推薦，免費)**：在 Secrets 加入 `GEMINI_API_KEY`
-2. **OpenAI**：在 Secrets 加入 `OPENAI_API_KEY`
+請在 Streamlit Cloud 的 Secrets 中設定以下任一 API Key：
 
-取得方式：
-- Gemini：https://aistudio.google.com/apikey
-- OpenAI：https://platform.openai.com/api-keys"""
+**1. Google Gemini 3.5 Flash (推薦，免費額度有限)**
+- 取得：https://aistudio.google.com/apikey
+- 加入：`GEMINI_API_KEY = "您的Key"`
+
+**2. Groq (備援，速度快)**
+- 取得：https://console.groq.com/keys
+- 加入：`GROQ_API_KEY = "您的Key"`"""
 
 def format_portfolio_for_ai(portfolio_data):
     """將持股資料格式化為 AI 可讀的格式"""
