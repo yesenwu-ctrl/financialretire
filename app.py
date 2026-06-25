@@ -245,36 +245,72 @@ def ask_ai(question, portfolio_context, provider_name, model_name, news_context=
 
 # ==================== 網路搜尋功能 ====================
 def search_stock_news(query, max_results=5):
-    """使用 SerpAPI 搜尋股票相關新聞"""
+    """直接從台灣財經新聞網站抓取相關新聞"""
+    import urllib.parse
+    import re
+    
+    news_list = []
+    
+    # 嘗試從 Yahoo 股市搜尋
     try:
-        from serpapi import GoogleSearch
+        encoded_query = urllib.parse.quote(query)
+        url = f"https://tw.stock.yahoo.com/news/search?q={encoded_query}"
         
-        serpapi_key = None
-        try:
-            serpapi_key = st.secrets["SERPAPI_API_KEY"]
-        except:
-            pass
+        req = urllib.request.Request(url, headers={
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+        })
         
-        if not serpapi_key:
-            return []
-        
-        params = {
-            "api_key": serpapi_key,
-            "engine": "google",
-            "q": query,
-            "gl": "tw",
-            "hl": "zh-tw",
-            "tbm": "nws",
-            "num": max_results
-        }
-        
-        search = GoogleSearch(params)
-        results = search.get_dict()
-        
-        news_results = results.get("news_results", [])
-        return news_results[:max_results]
+        with urllib.request.urlopen(req, timeout=10) as response:
+            html = response.read().decode('utf-8')
+            
+            # 找新聞標題和連結
+            title_pattern = r'<h3[^>]*>.*?<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>'
+            titles = re.findall(title_pattern, html, re.DOTALL)
+            
+            for link, title in titles[:max_results]:
+                clean_title = re.sub(r'<[^>]+>', '', title).strip()
+                if clean_title:
+                    news_list.append({
+                        'title': clean_title,
+                        'snippet': '',
+                        'link': link if link.startswith('http') else f"https://tw.stock.yahoo.com{link}",
+                        'source': 'Yahoo 股市',
+                        'date': ''
+                    })
     except Exception as e:
-        return []
+        pass
+    
+    # 如果 Yahoo 沒有結果，嘗試鉅亨網
+    if not news_list:
+        try:
+            encoded_query = urllib.parse.quote(query)
+            url = f"https://www.cnyes.com/search/news?q={encoded_query}"
+            
+            req = urllib.request.Request(url, headers={
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+            })
+            
+            with urllib.request.urlopen(req, timeout=10) as response:
+                html = response.read().decode('utf-8')
+                
+                # 找新聞標題
+                title_pattern = r'<a[^>]*class="[^"]*title[^"]*"[^>]*>(.*?)</a>'
+                titles = re.findall(title_pattern, html, re.DOTALL)
+                
+                for title in titles[:max_results]:
+                    clean_title = re.sub(r'<[^>]+>', '', title).strip()
+                    if clean_title:
+                        news_list.append({
+                            'title': clean_title,
+                            'snippet': '',
+                            'link': f"https://www.cnyes.com/search/news?q={encoded_query}",
+                            'source': '鉅亨網',
+                            'date': ''
+                        })
+        except Exception as e:
+            pass
+    
+    return news_list[:max_results]
 
 def format_news_for_ai(news_list):
     """將新聞格式化為 AI 可讀的格式"""
