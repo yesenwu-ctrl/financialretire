@@ -143,10 +143,21 @@ def search_stock_news(query, max_results=5):
     """搜尋股票相關新聞"""
     try:
         with DDGS() as ddgs:
+            # 嘗試新聞搜尋
             results = list(ddgs.news(query, region="tw-tw", max_results=max_results))
+            if results:
+                return results
+            # 如果沒有新聞結果，改用一般搜尋
+            results = list(ddgs.text(query + " 最新消息", region="tw-tw", max_results=max_results))
             return results
     except Exception as e:
-        return []
+        # 嘗試一般搜尋作為備援
+        try:
+            with DDGS() as ddgs:
+                results = list(ddgs.text(query + " 股票 新聞", region="tw-tw", max_results=max_results))
+                return results
+        except:
+            return []
 
 def search_web(query, max_results=5):
     """搜尋網路資訊"""
@@ -162,7 +173,7 @@ def format_news_for_ai(news_list):
     if not news_list:
         return "無法取得最新新聞。"
     
-    lines = ["以下是搜尋到的相關新聞：\n"]
+    lines = ["以下是搜尋到的相關資訊：\n"]
     for i, news in enumerate(news_list, 1):
         title = news.get('title', '無標題')
         body = news.get('body', '無摘要')
@@ -515,12 +526,19 @@ def main():
                     # 如果問題中提到特定股票，加入該股票名稱
                     for stock in portfolio_data:
                         if stock["code"] in prompt or stock["name"] in prompt:
-                            search_keywords = f"{stock['code']} {stock['name']} {prompt}"
+                            search_keywords = f"{stock['code']} {stock['name']} 股票 新聞"
                             break
+                    # 如果沒有特定股票，加上「台股」關鍵字
+                    if search_keywords == prompt:
+                        search_keywords = f"台股 {prompt}"
                     
                     with st.spinner("🔍 搜尋最新新聞..."):
                         news_results = search_stock_news(search_keywords, max_results=3)
                         news_context = format_news_for_ai(news_results)
+                        
+                        # 顯示搜尋到的新聞來源
+                        if news_results:
+                            st.info(f"📰 找到 {len(news_results)} 則相關資訊")
                 
                 # 嘗試使用 AI 回答（包含新聞）
                 gemini_key, groq_key = get_ai_config()
