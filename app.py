@@ -3,6 +3,7 @@
 """
 持股追蹤 Streamlit 應用程式
 資料來源：台灣證券交易所 (TWSE) 官方 API
+支援多個 AI 供應商：Gemini、Groq、OpenRouter、Anthropic
 """
 
 import streamlit as st
@@ -20,39 +21,94 @@ st.set_page_config(
 )
 
 # ==================== 密碼保護設定 ====================
-# 請修改為您想要的密碼
 APP_PASSWORD = "740704"
-# =====================================================
 
-# ==================== AI 功能設定 ====================
-# AI API 設定 (需在 Streamlit Cloud 設定 secrets)
-def get_ai_config():
-    """取得 AI API 設定"""
-    gemini_key = None
-    groq_key = None
-    
-    try:
-        gemini_key = st.secrets["GEMINI_API_KEY"]
-    except:
-        pass
-    
-    try:
-        groq_key = st.secrets["GROQ_API_KEY"]
-    except:
-        pass
-    
-    return gemini_key, groq_key
+# ==================== AI 供應商設定 ====================
+AI_PROVIDERS = {
+    "Google Gemini": {
+        "id": "gemini",
+        "secret": "GEMINI_API_KEY",
+        "models": [
+            {"value": "gemini-3.5-flash", "label": "Gemini 3.5 Flash (推薦)"},
+            {"value": "gemini-2.5-flash", "label": "Gemini 2.5 Flash"},
+            {"value": "gemini-2.5-pro", "label": "Gemini 2.5 Pro"},
+        ]
+    },
+    "Groq": {
+        "id": "groq",
+        "secret": "GROQ_API_KEY",
+        "models": [
+            {"value": "llama-3.3-70b-versatile", "label": "Llama 3.3 70B (推薦)"},
+            {"value": "llama-3.1-8b-instant", "label": "Llama 3.1 8B (快速)"},
+            {"value": "mixtral-8x7b-32768", "label": "Mixtral 8x7B"},
+        ]
+    },
+    "OpenRouter": {
+        "id": "openrouter",
+        "secret": "OPENROUTER_API_KEY",
+        "models": [
+            {"value": "deepseek/deepseek-v4-flash", "label": "DeepSeek V4 Flash (推薦)"},
+            {"value": "openai/gpt-oss-120b:free", "label": "GPT OSS 120B (免費)"},
+            {"value": "moonshotai/kimi-k2.6:free", "label": "Kimi K2.6 (免費)"},
+        ]
+    },
+    "Anthropic": {
+        "id": "anthropic",
+        "secret": "ANTHROPIC_API_KEY",
+        "models": [
+            {"value": "claude-sonnet-4-20250514", "label": "Claude Sonnet 4 (推薦)"},
+            {"value": "claude-3-5-haiku-20241022", "label": "Claude 3.5 Haiku (快速)"},
+        ]
+    }
+}
 
-def ask_ai_with_gemini(question, portfolio_context, api_key):
-    """使用 Google Gemini 3.5 Flash 回答"""
-    system_prompt = """你是一位專業的投資理財顧問，專精台灣股市分析。
-請根據用戶的持股資料，提供專業的投資建議和分析。
-回答時請使用繁體中文，並保持客觀、專業的態度。
-請注意：你的回答僅供參考，不構成投資建議。"""
-    
+# ==================== 結構化 AI 行為規範 ====================
+AI_SYSTEM_PROMPT = """你是一位專業的投資理財顧問，專精台灣股市分析。
+
+## 行為規範
+1. 使用繁體中文（台灣）回答
+2. 回答要專業但易懂，避免過多術語
+3. 根據用戶的持股資料提供具體分析
+4. 如有搜尋到最新新聞，請結合新聞分析
+5. 未完成分析時，不要問「下一步」，直接做到底
+6. 回答聚焦：是否完成、具體建議、風險提醒
+7. 請注意：你的回答僅供參考，不構成投資建議
+
+## 分析重點
+- 基本面：公司獲利、營收成長、產業地位
+- 技術面：股價趨勢、支撐壓力
+- 消息面：最新新聞、產業動態
+- 風險評估：投資風險、建議策略"""
+
+def get_available_providers():
+    """取得可用的 AI 供應商"""
+    available = []
+    for name, config in AI_PROVIDERS.items():
+        try:
+            key = st.secrets[config["secret"]]
+            if key:
+                available.append(name)
+        except:
+            pass
+    return available
+
+def get_provider_key(provider_name):
+    """取得供應商的 API Key"""
+    config = AI_PROVIDERS.get(provider_name)
+    if config:
+        try:
+            return st.secrets[config["secret"]]
+        except:
+            return None
+    return None
+
+def ask_ai_with_gemini(question, portfolio_context, api_key, model="gemini-3.5-flash", news_context=""):
+    """使用 Google Gemini 回答"""
     user_prompt = f"""以下是用戶目前的持股資料：
 
 {portfolio_context}
+
+{news_context}
 
 用戶的問題：{question}
 
@@ -64,25 +120,20 @@ def ask_ai_with_gemini(question, portfolio_context, api_key):
         client = genai.Client(api_key=api_key)
         
         response = client.models.generate_content(
-            model="gemini-3.5-flash",
-            contents=f"{system_prompt}\n\n{user_prompt}"
+            model=model,
+            contents=f"{AI_SYSTEM_PROMPT}\n\n{user_prompt}"
         )
         return response.text
-    except ImportError:
-        return "⚠️ 需要安裝 google-genai 套件。"
     except Exception as e:
-        return None  # 回傳 None 讓呼叫端嘗試下一個 API
+        return None
 
-def ask_ai_with_groq(question, portfolio_context, api_key):
-    """使用 Groq (Llama 3) 回答"""
-    system_prompt = """你是一位專業的投資理財顧問，專精台灣股市分析。
-請根據用戶的持股資料，提供專業的投資建議和分析。
-回答時請使用繁體中文，並保持客觀、專業的態度。
-請注意：你的回答僅供參考，不構成投資建議。"""
-    
+def ask_ai_with_groq(question, portfolio_context, api_key, model="llama-3.3-70b-versatile", news_context=""):
+    """使用 Groq 回答"""
     user_prompt = f"""以下是用戶目前的持股資料：
 
 {portfolio_context}
+
+{news_context}
 
 用戶的問題：{question}
 
@@ -94,48 +145,103 @@ def ask_ai_with_groq(question, portfolio_context, api_key):
         client = Groq(api_key=api_key)
         
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=model,
             messages=[
-                {"role": "system", "content": system_prompt},
+                {"role": "system", "content": AI_SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt}
             ],
             temperature=0.7,
-            max_tokens=1000
+            max_tokens=1500
         )
         return response.choices[0].message.content
-    except ImportError:
-        return "⚠️ 需要安裝 groq 套件。"
     except Exception as e:
-        return None  # 回傳 None 讓呼叫端嘗試下一個 API
+        return None
 
-def ask_ai(question, portfolio_context):
-    """使用 AI 回答投資相關問題 (支援多個 API 嘗試)"""
-    gemini_key, groq_key = get_ai_config()
+def ask_ai_with_openrouter(question, portfolio_context, api_key, model="deepseek/deepseek-v4-flash", news_context=""):
+    """使用 OpenRouter 回答"""
+    user_prompt = f"""以下是用戶目前的持股資料：
+
+{portfolio_context}
+
+{news_context}
+
+用戶的問題：{question}
+
+請根據以上資料回答用戶的問題。"""
     
-    # 1. 嘗試使用 Gemini 3.5 Flash (首要)
-    if gemini_key:
-        result = ask_ai_with_gemini(question, portfolio_context, gemini_key)
-        if result and not result.startswith("⚠️"):
-            return result
+    try:
+        import openai
+        
+        client = openai.OpenAI(
+            api_key=api_key,
+            base_url="https://openrouter.ai/api/v1"
+        )
+        
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": AI_SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.7,
+            max_tokens=1500
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return None
+
+def ask_ai_with_anthropic(question, portfolio_context, api_key, model="claude-sonnet-4-20250514", news_context=""):
+    """使用 Anthropic Claude 回答"""
+    user_prompt = f"""以下是用戶目前的持股資料：
+
+{portfolio_context}
+
+{news_context}
+
+用戶的問題：{question}
+
+請根據以上資料回答用戶的問題。"""
     
-    # 2. 嘗試使用 Groq (備援)
-    if groq_key:
-        result = ask_ai_with_groq(question, portfolio_context, groq_key)
-        if result and not result.startswith("⚠️"):
-            return result
+    try:
+        import anthropic
+        
+        client = anthropic.Anthropic(api_key=api_key)
+        
+        response = client.messages.create(
+            model=model,
+            max_tokens=1500,
+            system=AI_SYSTEM_PROMPT,
+            messages=[
+                {"role": "user", "content": user_prompt}
+            ]
+        )
+        return response.content[0].text
+    except Exception as e:
+        return None
+
+def ask_ai(question, portfolio_context, provider_name, model_name, news_context=""):
+    """使用選定的 AI 供應商回答"""
+    api_key = get_provider_key(provider_name)
     
-    # 3. 都無法使用時，顯示設定說明
-    return """⚠️ AI 功能尚未設定或已达使用上限。
-
-請在 Streamlit Cloud 的 Secrets 中設定以下任一 API Key：
-
-**1. Google Gemini 3.5 Flash (推薦，免費額度有限)**
-- 取得：https://aistudio.google.com/apikey
-- 加入：`GEMINI_API_KEY = "您的Key"`
-
-**2. Groq (備援，速度快)**
-- 取得：https://console.groq.com/keys
-- 加入：`GROQ_API_KEY = "您的Key"`"""
+    if not api_key:
+        return f"⚠️ {provider_name} API Key 未設定"
+    
+    # 根據供應商選擇對應的函數
+    if provider_name == "Google Gemini":
+        result = ask_ai_with_gemini(question, portfolio_context, api_key, model_name, news_context)
+    elif provider_name == "Groq":
+        result = ask_ai_with_groq(question, portfolio_context, api_key, model_name, news_context)
+    elif provider_name == "OpenRouter":
+        result = ask_ai_with_openrouter(question, portfolio_context, api_key, model_name, news_context)
+    elif provider_name == "Anthropic":
+        result = ask_ai_with_anthropic(question, portfolio_context, api_key, model_name, news_context)
+    else:
+        result = None
+    
+    if result:
+        return result
+    
+    return f"⚠️ {provider_name} 請求失敗，請稍後再試"
 
 # ==================== 網路搜尋功能 ====================
 def search_stock_news(query, max_results=5):
@@ -143,7 +249,6 @@ def search_stock_news(query, max_results=5):
     try:
         from serpapi import GoogleSearch
         
-        # 取得 SerpAPI Key
         serpapi_key = None
         try:
             serpapi_key = st.secrets["SERPAPI_API_KEY"]
@@ -159,7 +264,7 @@ def search_stock_news(query, max_results=5):
             "q": query,
             "gl": "tw",
             "hl": "zh-tw",
-            "tbm": "nws",  # 新聞搜尋
+            "tbm": "nws",
             "num": max_results
         }
         
@@ -168,37 +273,6 @@ def search_stock_news(query, max_results=5):
         
         news_results = results.get("news_results", [])
         return news_results[:max_results]
-    except Exception as e:
-        return []
-
-def search_web(query, max_results=5):
-    """使用 SerpAPI 搜尋網路資訊"""
-    try:
-        from serpapi import GoogleSearch
-        
-        serpapi_key = None
-        try:
-            serpapi_key = st.secrets["SERPAPI_API_KEY"]
-        except:
-            pass
-        
-        if not serpapi_key:
-            return []
-        
-        params = {
-            "api_key": serpapi_key,
-            "engine": "google",
-            "q": query,
-            "gl": "tw",
-            "hl": "zh-tw",
-            "num": max_results
-        }
-        
-        search = GoogleSearch(params)
-        results = search.get_dict()
-        
-        organic_results = results.get("organic_results", [])
-        return organic_results[:max_results]
     except Exception as e:
         return []
 
@@ -220,71 +294,6 @@ def format_news_for_ai(news_list):
         lines.append(f"   連結：{link}\n")
     
     return "\n".join(lines)
-
-def ask_ai_with_news(question, portfolio_context, api_key, news_context=""):
-    """使用 AI 回答投資問題（包含最新新聞）"""
-    system_prompt = """你是一位專業的投資理財顧問，專精台灣股市分析。
-請根據用戶的持股資料和最新新聞，提供專業的投資建議和分析。
-回答時請使用繁體中文，並保持客觀、專業的態度。
-請注意：你的回答僅供參考，不構成投資建議。"""
-    
-    user_prompt = f"""以下是用戶目前的持股資料：
-
-{portfolio_context}
-
-{news_context}
-
-用戶的問題：{question}
-
-請根據以上資料（包含最新新聞）回答用戶的問題。"""
-    
-    try:
-        from google import genai
-        
-        client = genai.Client(api_key=api_key)
-        
-        response = client.models.generate_content(
-            model="gemini-3.5-flash",
-            contents=f"{system_prompt}\n\n{user_prompt}"
-        )
-        return response.text
-    except Exception as e:
-        return None
-
-def ask_ai_with_groq_news(question, portfolio_context, api_key, news_context=""):
-    """使用 Groq 回答投資問題（包含最新新聞）"""
-    system_prompt = """你是一位專業的投資理財顧問，專精台灣股市分析。
-請根據用戶的持股資料和最新新聞，提供專業的投資建議和分析。
-回答時請使用繁體中文，並保持客觀、專業的態度。
-請注意：你的回答僅供參考，不構成投資建議。"""
-    
-    user_prompt = f"""以下是用戶目前的持股資料：
-
-{portfolio_context}
-
-{news_context}
-
-用戶的問題：{question}
-
-請根據以上資料（包含最新新聞）回答用戶的問題。"""
-    
-    try:
-        from groq import Groq
-        
-        client = Groq(api_key=api_key)
-        
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.7,
-            max_tokens=1000
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        return None
 
 def format_portfolio_for_ai(portfolio_data):
     """將持股資料格式化為 AI 可讀的格式"""
@@ -312,15 +321,12 @@ REALIZED_PNL = 1698
 
 def check_password():
     """密碼驗證函數"""
-    # 初始化 session state
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
     
-    # 如果已驗證，直接返回
     if st.session_state.authenticated:
         return True
     
-    # 顯示登入頁面
     st.markdown("""
     <style>
     .main {display: flex; justify-content: center; align-items: center; min-height: 60vh;}
@@ -346,7 +352,7 @@ def check_password():
     
     return False
 
-@st.cache_data(ttl=300)  # 快取5分鐘
+@st.cache_data(ttl=300)
 def fetch_twse_data(stock_code):
     """從 TWSE API 抓取個股成交資訊"""
     now = datetime.now()
@@ -375,39 +381,62 @@ def get_latest_close_price(data):
         return close_price, trade_date
     return None, None
 
-def get_stock_info(stock_code):
-    """取得個股基本資訊"""
-    url = f"https://www.twse.com.tw/zh/api/codeQuery?query={stock_code}"
-    try:
-        req = urllib.request.Request(url, headers={
-            'User-Agent': 'Mozilla/5.0'
-        })
-        with urllib.request.urlopen(req, timeout=5) as response:
-            data = json.loads(response.read().decode('utf-8'))
-            if data.get('suggestions'):
-                return data['suggestions'][0]
-    except:
-        pass
-    return None
-
 def main():
     # 密碼驗證
     if not check_password():
         return
     
-    # 側邊欄 - 登出按鈕
+    # 側邊欄
     with st.sidebar:
         st.markdown("### ⚙️ 設定")
         if st.button("🚪 登出", use_container_width=True):
             st.session_state.authenticated = False
             st.rerun()
         st.markdown("---")
+        
+        # AI 供應商選擇
+        st.markdown("### 🤖 AI 設定")
+        available_providers = get_available_providers()
+        
+        if available_providers:
+            selected_provider = st.selectbox(
+                "選擇 AI 供應商",
+                available_providers,
+                index=0
+            )
+            
+            # 取得該供應商的模型列表
+            provider_config = AI_PROVIDERS[selected_provider]
+            model_options = [m["label"] for m in provider_config["models"]]
+            selected_model_label = st.selectbox(
+                "選擇模型",
+                model_options,
+                index=0
+            )
+            # 取得實際模型值
+            selected_model = next(m["value"] for m in provider_config["models"] if m["label"] == selected_model_label)
+            
+            st.session_state.selected_provider = selected_provider
+            st.session_state.selected_model = selected_model
+            
+            st.info(f"✅ 已選擇：{selected_provider} / {selected_model_label}")
+        else:
+            st.warning("⚠️ 未設定任何 AI API Key")
+            st.markdown("""
+            請在 Settings → Secrets 中加入：
+            ```
+            GEMINI_API_KEY = "你的Key"
+            GROQ_API_KEY = "你的Key"
+            OPENROUTER_API_KEY = "你的Key"
+            ANTHROPIC_API_KEY = "你的Key"
+            ```
+            """)
+        
+        st.markdown("---")
         st.caption("資料來源：TWSE")
     
     # 標題
     st.title("📊 持股追蹤資訊")
-    
-    # 更新時間
     st.caption(f"資料更新時間：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 資料來源：台灣證券交易所 (TWSE)")
     
     # 手動更新按鈕
@@ -449,81 +478,51 @@ def main():
                 'tradeDate': trade_date
             })
     
-    # 計算總計
-    total_cost = sum(s['cost'] for s in portfolio_data)
-    total_market_value = sum(s['marketValue'] for s in portfolio_data)
-    total_unrealized_pnl = total_market_value - total_cost
-    total_pnl = total_unrealized_pnl + REALIZED_PNL
-    total_return = (total_pnl / total_cost) * 100
-    
-    # 摘要卡片
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("持股成本", f"NT${total_cost:,.0f}")
-    with col2:
-        st.metric("目前市值", f"NT${total_market_value:,.0f}")
-    with col3:
-        st.metric("未實現損益", 
-                   f"NT${total_unrealized_pnl:+,.0f}",
-                   f"{total_unrealized_pnl/total_cost*100:+.2f}%")
-    with col4:
-        st.metric("整體報酬率", 
-                   f"{total_return:+.2f}%",
-                   delta=f"NT${total_pnl:+,.0f}")
-    
-    st.divider()
-    
-    # 持股明細表格
-    st.subheader("📋 持股明細")
+    # 顯示持股表格
+    st.subheader("📋 目前持股")
     
     df = pd.DataFrame(portfolio_data)
-    
-    # 格式化顯示
-    display_df = pd.DataFrame({
-        '標的': df.apply(lambda x: f"**{x['code']}** {x['name']}", axis=1),
-        '持股': df['shares'].apply(lambda x: f"{x:,} 股"),
-        '成本': df['cost'].apply(lambda x: f"{x:,.0f}"),
-        '均價': df['cost_per_share'].apply(lambda x: f"{x:,.1f}"),
-        '前日收盤': df['prevClose'].apply(lambda x: f"{x:,.2f}"),
-        '最新收盤': df['currentPrice'].apply(lambda x: f"{x:,.2f}"),
-        '損益金額': df['unrealizedPnl'].apply(lambda x: f"{x:+,.0f}"),
-        '損益%': df['unrealizedPnlPct'].apply(lambda x: f"{x:+.2f}%"),
+    df = df.rename(columns={
+        'code': '股票代號',
+        'name': '股票名稱',
+        'shares': '持有股數',
+        'cost': '成本',
+        'cost_per_share': '每股成本',
+        'currentPrice': '目前價格',
+        'marketValue': '市值',
+        'unrealizedPnl': '未實現損益',
+        'unrealizedPnlPct': '損益%',
+        'tradeDate': '交易日'
     })
     
-    st.dataframe(display_df, use_container_width=True, hide_index=True)
+    st.dataframe(
+        df[['股票代號', '股票名稱', '持有股數', '成本', '目前價格', '市值', '未實現損益', '損益%', '交易日']],
+        use_container_width=True,
+        hide_index=True
+    )
     
-    # 個股詳細資訊
+    # 總計
+    total_cost = sum(s['cost'] for s in portfolio_data)
+    total_market = sum(s['marketValue'] for s in portfolio_data)
+    total_pnl = total_market - total_cost
+    total_pnl_pct = (total_pnl / total_cost) * 100
+    
     st.divider()
-    st.subheader("📈 個股走勢")
     
-    tabs = st.tabs([f"{s['code']} {s['name']}" for s in portfolio_data])
+    # 關鍵指標
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("總成本", f"NT${total_cost:,.0f}")
+    with col2:
+        st.metric("總市值", f"NT${total_market:,.0f}")
+    with col3:
+        st.metric("未實現損益", f"NT${total_pnl:+,.0f}", f"{total_pnl_pct:+.2f}%")
+    with col4:
+        st.metric("已實現損益", f"NT${REALIZED_PNL:+,.0f}")
     
-    for tab, stock in zip(tabs, portfolio_data):
-        with tab:
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                price_change = stock['currentPrice'] - stock['prevClose']
-                price_change_pct = (price_change / stock['prevClose']) * 100
-                st.metric("今日漲跌", 
-                          f"{stock['currentPrice']:.2f}",
-                          f"{price_change:+.2f} ({price_change_pct:+.2f}%)")
-            
-            with col2:
-                st.metric("持股數量", f"{stock['shares']:,} 股")
-            
-            with col3:
-                st.metric("損益", 
-                          f"NT${stock['unrealizedPnl']:+,.0f}",
-                          f"{stock['unrealizedPnlPct']:+.2f}%")
-    
-    # 免責聲明
     st.divider()
-    st.caption("⚠️ 免責聲明：本資訊僅供參考，不構成任何投資建議。投資有風險，請自行判斷。")
     
     # ==================== AI 投資助手 ====================
-    st.divider()
     st.subheader("🤖 AI 投資助手")
     st.caption("有任何投資問題，可以直接在下方提問，AI 會根據您的持股資料進行分析")
     
@@ -555,14 +554,11 @@ def main():
                 # 根據用戶問題搜尋相關新聞
                 news_context = ""
                 if use_news_search:
-                    # 根據問題和持股建立搜尋關鍵字
                     search_keywords = prompt
-                    # 如果問題中提到特定股票，加入該股票名稱
                     for stock in portfolio_data:
                         if stock["code"] in prompt or stock["name"] in prompt:
                             search_keywords = f"{stock['code']} {stock['name']} 股票 新聞"
                             break
-                    # 如果沒有特定股票，加上「台股」關鍵字
                     if search_keywords == prompt:
                         search_keywords = f"台股 {prompt}"
                     
@@ -570,49 +566,23 @@ def main():
                         news_results = search_stock_news(search_keywords, max_results=3)
                         news_context = format_news_for_ai(news_results)
                         
-                        # 顯示搜尋到的新聞來源
                         if news_results:
                             st.info(f"📰 找到 {len(news_results)} 則相關資訊")
-                            # 顯示新聞摘要供用戶查看
                             with st.expander("📋 查看搜尋到的新聞內容", expanded=False):
                                 for i, news in enumerate(news_results, 1):
                                     title = news.get('title', '無標題')
-                                    body = news.get('body', '無摘要')[:200]  # 限制長度
+                                    snippet = news.get('snippet', '無摘要')[:200]
                                     st.write(f"**{i}. {title}**")
-                                    st.write(f"   {body}...")
+                                    st.write(f"   {snippet}...")
                                     st.write("")
                         else:
                             st.warning("⚠️ 無法取得最新新聞，將使用歷史資料分析")
                 
-                # 嘗試使用 AI 回答（包含新聞）
-                gemini_key, groq_key = get_ai_config()
+                # 使用選定的 AI 供應商
+                provider_name = st.session_state.get("selected_provider", "Google Gemini")
+                model_name = st.session_state.get("selected_model", "gemini-3.5-flash")
                 
-                response = None
-                # 1. 嘗試 Gemini (首要)
-                if gemini_key:
-                    response = ask_ai_with_news(prompt, portfolio_context, gemini_key, news_context)
-                
-                # 2. 嘗試 Groq (備援)
-                if not response and groq_key:
-                    response = ask_ai_with_groq_news(prompt, portfolio_context, groq_key, news_context)
-                
-                # 3. 都失敗則顯示設定說明
-                if not response:
-                    response = """⚠️ AI 功能尚未設定或已达使用上限。
-
-請在 Streamlit Cloud 的 Secrets 中設定以下 API Keys：
-
-**1. Google Gemini 3.5 Flash (AI 主要)**
-- 取得：https://aistudio.google.com/apikey
-- 加入：`GEMINI_API_KEY = "您的Key"`
-
-**2. Groq (AI 備援)**
-- 取得：https://console.groq.com/keys
-- 加入：`GROQ_API_KEY = "您的Key"`
-
-**3. SerpAPI (新聞搜尋)**
-- 取得：https://serpapi.com/users/sign_up (免費 250 次/月)
-- 加入：`SERPAPI_API_KEY = "您的Key"`"""
+                response = ask_ai(prompt, portfolio_context, provider_name, model_name, news_context)
                 
                 st.markdown(response)
         st.session_state.messages.append({"role": "assistant", "content": response})
