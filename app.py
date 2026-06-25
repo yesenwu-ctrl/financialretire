@@ -159,6 +159,19 @@ def search_stock_news(query, max_results=5):
         except:
             return []
 
+def fetch_twse_news(stock_code):
+    """從台灣證券交易所抓取股票新聞"""
+    try:
+        url = f"https://www.twse.com.tw/news/news.html?query={stock_code}"
+        req = urllib.request.Request(url, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
+        with urllib.request.urlopen(req, timeout=10) as response:
+            # 這裡只是範例，實際需要解析 HTML
+            return []
+    except:
+        return []
+
 def search_web(query, max_results=5):
     """搜尋網路資訊"""
     try:
@@ -539,6 +552,14 @@ def main():
                         # 顯示搜尋到的新聞來源
                         if news_results:
                             st.info(f"📰 找到 {len(news_results)} 則相關資訊")
+                            # 顯示新聞摘要供用戶查看
+                            with st.expander("📋 查看搜尋到的新聞內容", expanded=False):
+                                for i, news in enumerate(news_results, 1):
+                                    title = news.get('title', '無標題')
+                                    body = news.get('body', '無摘要')[:200]  # 限制長度
+                                    st.write(f"**{i}. {title}**")
+                                    st.write(f"   {body}...")
+                                    st.write("")
                         else:
                             st.warning("⚠️ 無法取得最新新聞，將使用歷史資料分析")
                 
