@@ -11,7 +11,6 @@ import urllib.request
 import urllib.error
 from datetime import datetime
 import pandas as pd
-from duckduckgo_search import DDGS
 
 # 頁面設定
 st.set_page_config(
@@ -140,44 +139,66 @@ def ask_ai(question, portfolio_context):
 
 # ==================== 網路搜尋功能 ====================
 def search_stock_news(query, max_results=5):
-    """搜尋股票相關新聞"""
+    """使用 SerpAPI 搜尋股票相關新聞"""
     try:
-        with DDGS() as ddgs:
-            # 嘗試新聞搜尋 (不指定區域，增加成功率)
-            results = list(ddgs.news(query, max_results=max_results))
-            if results:
-                return results
-            # 如果沒有新聞結果，改用一般搜尋
-            results = list(ddgs.text(query + " 最新消息", max_results=max_results))
-            return results
-    except Exception as e:
-        # 嘗試一般搜尋作為備援
+        from serpapi import GoogleSearch
+        
+        # 取得 SerpAPI Key
+        serpapi_key = None
         try:
-            with DDGS() as ddgs:
-                results = list(ddgs.text(query + " 股票 新聞", max_results=max_results))
-                return results
+            serpapi_key = st.secrets["SERPAPI_API_KEY"]
         except:
+            pass
+        
+        if not serpapi_key:
             return []
-
-def fetch_twse_news(stock_code):
-    """從台灣證券交易所抓取股票新聞"""
-    try:
-        url = f"https://www.twse.com.tw/news/news.html?query={stock_code}"
-        req = urllib.request.Request(url, headers={
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        })
-        with urllib.request.urlopen(req, timeout=10) as response:
-            # 這裡只是範例，實際需要解析 HTML
-            return []
-    except:
+        
+        params = {
+            "api_key": serpapi_key,
+            "engine": "google",
+            "q": query,
+            "gl": "tw",
+            "hl": "zh-tw",
+            "tbm": "nws",  # 新聞搜尋
+            "num": max_results
+        }
+        
+        search = GoogleSearch(params)
+        results = search.get_dict()
+        
+        news_results = results.get("news_results", [])
+        return news_results[:max_results]
+    except Exception as e:
         return []
 
 def search_web(query, max_results=5):
-    """搜尋網路資訊"""
+    """使用 SerpAPI 搜尋網路資訊"""
     try:
-        with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=max_results))
-            return results
+        from serpapi import GoogleSearch
+        
+        serpapi_key = None
+        try:
+            serpapi_key = st.secrets["SERPAPI_API_KEY"]
+        except:
+            pass
+        
+        if not serpapi_key:
+            return []
+        
+        params = {
+            "api_key": serpapi_key,
+            "engine": "google",
+            "q": query,
+            "gl": "tw",
+            "hl": "zh-tw",
+            "num": max_results
+        }
+        
+        search = GoogleSearch(params)
+        results = search.get_dict()
+        
+        organic_results = results.get("organic_results", [])
+        return organic_results[:max_results]
     except Exception as e:
         return []
 
@@ -189,14 +210,14 @@ def format_news_for_ai(news_list):
     lines = ["以下是搜尋到的相關資訊：\n"]
     for i, news in enumerate(news_list, 1):
         title = news.get('title', '無標題')
-        body = news.get('body', '無摘要')
-        url = news.get('url', '')
+        snippet = news.get('snippet', '無摘要')
+        link = news.get('link', '')
         source = news.get('source', '')
         date = news.get('date', '')
         lines.append(f"{i}. **{title}**")
         lines.append(f"   來源：{source} | 時間：{date}")
-        lines.append(f"   摘要：{body}")
-        lines.append(f"   連結：{url}\n")
+        lines.append(f"   摘要：{snippet}")
+        lines.append(f"   連結：{link}\n")
     
     return "\n".join(lines)
 
@@ -579,15 +600,19 @@ def main():
                 if not response:
                     response = """⚠️ AI 功能尚未設定或已达使用上限。
 
-請在 Streamlit Cloud 的 Secrets 中設定以下任一 API Key：
+請在 Streamlit Cloud 的 Secrets 中設定以下 API Keys：
 
-**1. Google Gemini 3.5 Flash (推薦)**
+**1. Google Gemini 3.5 Flash (AI 主要)**
 - 取得：https://aistudio.google.com/apikey
 - 加入：`GEMINI_API_KEY = "您的Key"`
 
-**2. Groq (備援)**
+**2. Groq (AI 備援)**
 - 取得：https://console.groq.com/keys
-- 加入：`GROQ_API_KEY = "您的Key"`"""
+- 加入：`GROQ_API_KEY = "您的Key"`
+
+**3. SerpAPI (新聞搜尋)**
+- 取得：https://serpapi.com/users/sign_up (免費 250 次/月)
+- 加入：`SERPAPI_API_KEY = "您的Key"`"""
                 
                 st.markdown(response)
         st.session_state.messages.append({"role": "assistant", "content": response})
