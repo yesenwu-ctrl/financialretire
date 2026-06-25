@@ -24,6 +24,68 @@ st.set_page_config(
 APP_PASSWORD = "740704"
 # =====================================================
 
+# ==================== AI 功能設定 ====================
+# OpenAI API 設定 (需在 Streamlit Cloud 設定 secrets)
+def get_openai_api_key():
+    """取得 OpenAI API Key"""
+    try:
+        return st.secrets["OPENAI_API_KEY"]
+    except:
+        return None
+
+def ask_ai(question, portfolio_context):
+    """使用 AI 回答投資相關問題"""
+    api_key = get_openai_api_key()
+    if not api_key:
+        return "⚠️ AI 功能尚未設定。請在 Streamlit Cloud 的 Secrets 中設定 OPENAI_API_KEY。"
+    
+    system_prompt = """你是一位專業的投資理財顧問，專精台灣股市分析。
+請根據用戶的持股資料，提供專業的投資建議和分析。
+回答時請使用繁體中文，並保持客觀、專業的態度。
+請注意：你的回答僅供參考，不構成投資建議。"""
+    
+    user_prompt = f"""以下是用戶目前的持股資料：
+
+{portfolio_context}
+
+用戶的問題：{question}
+
+請根據以上資料回答用戶的問題。"""
+    
+    try:
+        import openai
+        client = openai.OpenAI(api_key=api_key)
+        
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.7,
+            max_tokens=1000
+        )
+        
+        return response.choices[0].message.content
+    except ImportError:
+        return "⚠️ 需要安裝 openai 套件。請在 requirements.txt 加入 openai。"
+    except Exception as e:
+        return f"⚠️ AI 請求失敗：{str(e)}"
+
+def format_portfolio_for_ai(portfolio_data):
+    """將持股資料格式化為 AI 可讀的格式"""
+    lines = []
+    for stock in portfolio_data:
+        lines.append(f"- {stock['code']} {stock['name']}：持有 {stock['shares']:,} 股，成本 {stock['cost']:,} 元，目前價格 {stock['currentPrice']:.2f} 元，損益 {stock['unrealizedPnl']:+,.0f} 元 ({stock['unrealizedPnlPct']:+.2f}%)")
+    
+    total_cost = sum(s['cost'] for s in portfolio_data)
+    total_market = sum(s['marketValue'] for s in portfolio_data)
+    total_pnl = total_market - total_cost
+    
+    lines.append(f"\n總計：成本 {total_cost:,} 元，市值 {total_market:,.0f} 元，未實現損益 {total_pnl:+,.0f} 元 ({total_pnl/total_cost*100:+.2f}%)")
+    
+    return "\n".join(lines)
+
 # 持股資料
 PORTFOLIO = [
     {'code': '2801', 'name': '彰銀', 'shares': 2000, 'cost': 41950, 'prevClose': 23.20},
@@ -245,6 +307,35 @@ def main():
     # 免責聲明
     st.divider()
     st.caption("⚠️ 免責聲明：本資訊僅供參考，不構成任何投資建議。投資有風險，請自行判斷。")
+    
+    # ==================== AI 投資助手 ====================
+    st.divider()
+    st.subheader("🤖 AI 投資助手")
+    st.caption("有任何投資問題，可以直接在下方提問，AI 會根據您的持股資料進行分析")
+    
+    # 初始化聊天記錄
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+    
+    # 顯示歷史訊息
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+    
+    # 使用者輸入
+    if prompt := st.chat_input("請輸入您的投資問題..."):
+        # 顯示使用者訊息
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        
+        # 生成 AI 回答
+        with st.chat_message("assistant"):
+            with st.spinner("AI 正在分析中..."):
+                portfolio_context = format_portfolio_for_ai(portfolio_data)
+                response = ask_ai(prompt, portfolio_context)
+                st.markdown(response)
+        st.session_state.messages.append({"role": "assistant", "content": response})
 
 if __name__ == '__main__':
     main()
